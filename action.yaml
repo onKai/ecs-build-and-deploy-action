@@ -5,78 +5,65 @@ inputs:
     description: 'Working directory for build'
     required: true
     default: '/'
+  aws_secret_id:
+    description: 'AWS Access Key ID'
+    required: true
+  aws_secret_key:
+    description: 'AWS Secret Access Key'
+    required: true
+
 runs:
   using: "composite"
   steps:
-  - name: Checkout
-    uses: actions/checkout@v2
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ inputs.aws_secret_id }}
+        aws-secret-access-key: ${{ inputs.aws_secret_key }}
+        aws-region: us-east-1
 
-  - name: Configure AWS credentials
-    uses: aws-actions/configure-aws-credentials@v1
-    with:
-      aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      aws-region: us-east-1
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
 
-  - name: Evaluate variables
-    shell: bash
-    run: |
-      BRANCH=$(echo ${GITHUB_REF#refs/heads/})
-      if echo ${BRANCH} | grep -q "^main$"; then ENVIRONMENT=prod; else ENVIRONMENT=staging; fi
-      source .${{ inputs.build_path }}ecs-variables-${ENVIRONMENT}.env
-      echo "::set-output name=branch::${BRANCH}"
-      echo "::set-output name=environment::${ENVIRONMENT}"
-      echo "::set-output name=ecs-cluster::${ecsCluster}"
-      echo "::set-output name=ecs-service::${ecsService}"
-      echo "::set-output name=containerName::${containerName}"
-      echo "::set-output name=region::${region}"
-      echo "::set-output name=task-definition::${taskDefinition}"
-      echo "::set-output name=ecr-repository::${ecr_repository}"
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: ${{ env.ecr_repository }}
+        BRANCH: ${{ env.branch }}
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Build a docker container and
+        # push it to ECR so that it can
+        # be deployed to ECS.
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:$BRANCH-$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:$BRANCH .${{ inputs.build_path }}
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$BRANCH-$IMAGE_TAG
+        echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$BRANCH-$IMAGE_TAG"
 
-    id: evaluate_variables
+    - name: Download task definition
+      env:
+        AWS_REGION: ${{ env.region }}
+        TASK_DEF: ${{ env.taskDefinition }}
+      run: |
+        aws ecs describe-task-definition --task-definition $TASK_DEF --query taskDefinition > task-definition.json
 
-  - name: Login to Amazon ECR
-    id: login-ecr
-    uses: aws-actions/amazon-ecr-login@v1
+    - name: Fill in the new image ID in the Amazon ECS task definition
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: task-definition.json
+        container-name: ${{ env.containerName }}
+        image: ${{ steps.build-image.outputs.image }}
 
-  - name: Build, tag, and push image to Amazon ECR
-    id: build-image
-    env:
-      ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-      ECR_REPOSITORY: ${{ steps.evaluate_variables.outputs.ecr-repository }}
-      BRANCH: ${{ steps.evaluate_variables.outputs.branch }}
-      IMAGE_TAG: ${{ github.sha }}
-    run: |
-      # Build a docker container and
-      # push it to ECR so that it can
-      # be deployed to ECS.
-      docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:$BRANCH-$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:$BRANCH .${{ inputs.build_path }}
-      docker push $ECR_REGISTRY/$ECR_REPOSITORY:$BRANCH-$IMAGE_TAG
-      echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$BRANCH-$IMAGE_TAG"
-
-  - name: Download task definition
-    env:
-      AWS_REGION: ${{ steps.evaluate_variables.outputs.region }}
-      TASK_DEF: ${{ steps.evaluate_variables.outputs.task-definition }}
-    run: |
-      aws ecs describe-task-definition --task-definition $TASK_DEF --query taskDefinition > task-definition.json
-
-  - name: Fill in the new image ID in the Amazon ECS task definition
-    id: task-def
-    uses: aws-actions/amazon-ecs-render-task-definition@v1
-    with:
-      task-definition: task-definition.json
-      container-name: ${{ steps.evaluate_variables.outputs.containerName }}
-      image: ${{ steps.build-image.outputs.image }}
-
-  - name: Deploy Amazon ECS task definition
-    id: task-deploy
-    timeout-minutes: 15
-    env:
-      AWS_REGION: ${{ steps.evaluate_variables.outputs.region }}
-    uses: aws-actions/amazon-ecs-deploy-task-definition@v1
-    with:
-      task-definition: ${{ steps.task-def.outputs.task-definition }}
-      service: ${{ steps.evaluate_variables.outputs.ecs-service }}
-      cluster: ${{ steps.evaluate_variables.outputs.ecs-cluster }}
-      wait-for-service-stability: true
+    - name: Deploy Amazon ECS task definition
+      id: task-deploy
+      timeout-minutes: 15
+      env:
+        AWS_REGION: ${{ env.region }}
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ env.taskDefinition }}
+        service: ${{ env.ecsService }}
+        cluster: ${{ env.ecsCluster }}
+        wait-for-service-stability: true
