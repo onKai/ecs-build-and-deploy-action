@@ -28,6 +28,7 @@ runs:
 
     - name: Build, tag, and push image to Amazon ECR
       id: build-image
+      shell: bash
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         ECR_REPOSITORY: ${{ env.ecr_repository }}
@@ -45,6 +46,7 @@ runs:
       env:
         AWS_REGION: ${{ env.region }}
         TASK_DEF: ${{ env.taskDefinition }}
+      shell: bash
       run: |
         aws ecs describe-task-definition --task-definition $TASK_DEF --query taskDefinition > task-definition.json
 
@@ -58,12 +60,11 @@ runs:
 
     - name: Deploy Amazon ECS task definition
       id: task-deploy
-      timeout-minutes: 15
       env:
         AWS_REGION: ${{ env.region }}
       uses: aws-actions/amazon-ecs-deploy-task-definition@v1
       with:
-        task-definition: ${{ env.taskDefinition }}
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
         service: ${{ env.ecsService }}
         cluster: ${{ env.ecsCluster }}
         wait-for-service-stability: true
