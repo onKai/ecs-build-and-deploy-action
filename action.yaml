@@ -40,7 +40,7 @@ runs:
     - name: Copy npmrc
       working-directory: ${{ inputs.build_path }}
       shell: bash
-      run: cat /root/.npmrc && cp /root/.npmrc ./npmrc 
+      run: cat ~/.npmrc && cp ~/.npmrc ./npmrc 
 
     - name: Build, tag, and push image to Amazon ECR
       working-directory: ${{ inputs.build_path }}
