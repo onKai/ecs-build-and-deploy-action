@@ -4,7 +4,7 @@ inputs:
   build_path:  # id of input
     description: 'Working directory for build'
     required: true
-    default: '/'
+    default: './'
   aws_secret_id:
     description: 'AWS Access Key ID'
     required: true
@@ -26,9 +26,30 @@ runs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v1
 
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Setup Node
+      uses: actions/setup-node@v2
+      with:
+        node-version: '14'
+
+    - name: Login to Amazon CodeArtifact
+      id: login-codeartifact
+      working-directory: ${{ inputs.build_path }}
+      shell: bash
+      run: aws codeartifact login --tool npm --repository onkai-npm-packages --domain onkai --namespace onkai --duration-seconds 900
+
+    - name: Copy npmrc
+      working-directory: ${{ inputs.build_path }}
+      shell: bash
+      run: cat ~/.npmrc && cp ~/.npmrc ./npmrc
+
     - name: Build, tag, and push image to Amazon ECR
       id: build-image
       shell: bash
+      working-directory: ${{ inputs.build_path }}
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         ECR_REPOSITORY: ${{ env.ecr_repository }}
@@ -38,7 +59,7 @@ runs:
         # Build a docker container and
         # push it to ECR so that it can
         # be deployed to ECS.
-        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:$BRANCH-$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:$BRANCH .${{ inputs.build_path }}
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:$BRANCH-$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:$BRANCH .
         docker push --all-tags $ECR_REGISTRY/$ECR_REPOSITORY
         echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$BRANCH-$IMAGE_TAG"
 
