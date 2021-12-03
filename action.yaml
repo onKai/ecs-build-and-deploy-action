@@ -26,6 +26,20 @@ runs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v1
 
+    - name: Setup Node
+      uses: actions/setup-node@v2
+      with:
+        node-version: '14'
+
+    - name: Login to Amazon CodeArtifact
+      id: login-codeartifact
+      working-directory: ${{ inputs.build_path }}
+      run: aws codeartifact login --tool npm --repository onkai-npm-packages --domain onkai --namespace onkai --duration-seconds 900
+
+    - name: Copy npmrc
+      working-directory: ${{ inputs.build_path }}
+      run: cat /root/.npmrc && cp /root/.npmrc ./npmrc 
+
     - name: Build, tag, and push image to Amazon ECR
       id: build-image
       shell: bash
