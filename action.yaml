@@ -34,10 +34,12 @@ runs:
     - name: Login to Amazon CodeArtifact
       id: login-codeartifact
       working-directory: ${{ inputs.build_path }}
+      shell: bash
       run: aws codeartifact login --tool npm --repository onkai-npm-packages --domain onkai --namespace onkai --duration-seconds 900
 
     - name: Copy npmrc
       working-directory: ${{ inputs.build_path }}
+      shell: bash
       run: cat /root/.npmrc && cp /root/.npmrc ./npmrc 
 
     - name: Build, tag, and push image to Amazon ECR
